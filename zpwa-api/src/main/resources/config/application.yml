@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: zpwa-api
+  security:
+    filter:
+      dispatcher-types: [ request, error, async ]
+    user:
+      name: zpwa
+      password: zpwa
+  main:
+    web-application-type: servlet
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+springdoc:
+  api-docs:
+    path: /api-docs
+    version: OPENAPI_3_1
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui
+    enabled: true

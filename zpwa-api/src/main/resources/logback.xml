@@ -1,0 +1,23 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{ISO8601} %-5p %c{30}:%L %m %ex%n</pattern>
+    </encoder>
+  </appender>
+  <appender name="TRANSACTIONS" class="ch.qos.logback.core.FileAppender">
+    <file>logs/transactions.log</file>
+    <param name="Append" value="false" />
+    <encoder>
+      <pattern>%d{ISO8601} %m%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.rinami" level="DEBUG" />
+  <logger name="transactions" level="INFO" additivity="false">
+    <appender-ref ref="TRANSACTIONS" />
+  </logger>
+
+  <root level="DEBUG">
+    <appender-ref ref="STDOUT" />
+  </root>
+</configuration>
