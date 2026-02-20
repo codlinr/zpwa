@@ -1,0 +1,22 @@
+<main class="login">
+  <h1>Sign in</h1>
+
+  <form (ngSubmit)="submit()" #form="ngForm" class="login-form">
+    <label>
+      Username
+      <input name="username" [(ngModel)]="username" required />
+    </label>
+
+    <label class="login-password">
+      Password
+      <input name="password" type="password" [(ngModel)]="password" required />
+    </label>
+
+    <div class="login-actions">
+      <button type="submit" [disabled]="form.invalid">Continue</button>
+    </div>
+
+    <p *ngIf="error" class="error">{{ error }}</p>
+  </form>
+</main>
+

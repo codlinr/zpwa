@@ -1,0 +1,117 @@
+<section class="page">
+  <header class="page-header">
+    <h2>Work orders</h2>
+  </header>
+
+  <section class="offline-bar">
+    <label class="offline-toggle">
+      <input
+        type="checkbox"
+        [checked]="networkState.isOffline()"
+        (change)="networkState.setForceOffline($any($event.target).checked)"
+      />
+      Offline mode
+    </label>
+    <span class="pending" *ngIf="offlineQueue.pendingCount() > 0">
+      Pending: {{ offlineQueue.pendingCount() }}
+    </span>
+    <button
+      type="button"
+      class="sync-btn"
+      [disabled]="offlineQueue.pendingCount() === 0 || syncing()"
+      (click)="runSync()"
+    >
+      {{ syncing() ? 'Syncing…' : 'Sync' }}
+    </button>
+  </section>
+
+  <p *ngIf="syncMessage" class="sync-msg">{{ syncMessage }}</p>
+  <p *ngIf="showingCachedData()" class="sync-msg cached-indicator">
+    📦 Showing cached data (offline mode)
+  </p>
+
+  <section class="controls">
+    <label>
+      Branch
+      <input [(ngModel)]="branch" />
+    </label>
+
+    <button type="button" (click)="loadFirstPage()">Load list</button>
+  </section>
+
+  <section class="create">
+    <h3>Create work order</h3>
+
+    <label>
+      Asset number
+      <input type="number" [(ngModel)]="newAssetNumber" />
+    </label>
+
+    <label>
+      Description
+      <input [(ngModel)]="newDescription" />
+    </label>
+
+    <div class="create-actions">
+      <button type="button" (click)="createWorkOrder()" [disabled]="creating()">
+        {{ creating() ? 'Creating…' : 'Create' }}
+      </button>
+      <span class="create-loader" *ngIf="creating()">Creating order…</span>
+    </div>
+  </section>
+
+  <p *ngIf="error" class="error">{{ error }}</p>
+
+  <section *ngIf="hasListContent()" class="list-section">
+    <ul class="list">
+      <li *ngFor="let order of getDisplayedRecordsWithPending()">
+        <div class="primary">
+          #{{ order.orderNumber }} · {{ order.description }}
+          <span *ngIf="isPendingOrder(order)" class="pending-badge">(Pending sync)</span>
+        </div>
+        <div class="secondary">
+          Branch {{ order.branch }} · Asset {{ order.assetNumber }}
+          <div class="status-control">
+            <span>Status:</span>
+            <select
+              *ngIf="isRegularOrder(order)"
+              [ngModel]="order.status"
+              (ngModelChange)="changeStatus(order, $event)"
+            >
+              <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
+            </select>
+            <span *ngIf="isPendingOrder(order)" class="status-text">{{ order.status }}</span>
+          </div>
+        </div>
+
+        <label class="upload" *ngIf="isRegularOrder(order)">
+          Attach photo
+          <input type="file" accept="image/*" (change)="uploadImage(order, $event)" />
+        </label>
+      </li>
+    </ul>
+
+    <div class="pager-bar" *ngIf="page() as p">
+      <p class="summary">
+        Showing page {{ getCurrentViewPage() }} of {{ getTotalViewPages() }} ({{ p.recordSize }}
+        records)
+      </p>
+      <div class="pager">
+        <button type="button" (click)="previousPage()" [disabled]="getCurrentViewPage() <= 1">
+          Previous
+        </button>
+        <button
+          type="button"
+          (click)="nextPage()"
+          [disabled]="getCurrentViewPage() >= getTotalViewPages()"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+    <p *ngIf="!page() && getPendingCreatedOrders().length > 0" class="summary">
+      {{ getPendingCreatedOrders().length }} order(s) pending sync. Load list to see all.
+    </p>
+  </section>
+</section>
+

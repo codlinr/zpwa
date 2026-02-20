@@ -1,0 +1,50 @@
+<section class="page">
+  <header class="page-header">
+    <h2>Equipment</h2>
+  </header>
+
+  <section class="controls">
+    <label>
+      Branch
+      <input [(ngModel)]="branch" />
+    </label>
+
+    <button type="button" (click)="loadFirstPage()">Load list</button>
+  </section>
+
+  <p *ngIf="error" class="error">{{ error }}</p>
+  <p *ngIf="showingCachedData()" class="sync-msg cached-indicator">
+    📦 Showing cached data (offline mode)
+  </p>
+
+  <section *ngIf="page() as p" class="list-section">
+    <ul class="list">
+      <li *ngFor="let item of getDisplayedRecords()">
+        <div class="primary">{{ item.description }}</div>
+        <div class="secondary">
+          Asset {{ item.assetNumber }} · Branch {{ item.branch }}
+        </div>
+      </li>
+    </ul>
+
+    <div class="pager-bar">
+      <p class="summary">
+        Showing page {{ getCurrentViewPage() }} of {{ getTotalViewPages() }} ({{ p.recordSize }}
+        records)
+      </p>
+      <div class="pager">
+        <button type="button" (click)="previousPage()" [disabled]="getCurrentViewPage() <= 1">
+          Previous
+        </button>
+        <button
+          type="button"
+          (click)="nextPage()"
+          [disabled]="getCurrentViewPage() >= getTotalViewPages()"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  </section>
+</section>
+
