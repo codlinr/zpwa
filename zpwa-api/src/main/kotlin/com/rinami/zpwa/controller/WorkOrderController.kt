@@ -107,7 +107,7 @@ Each page contains up to 1000 records."""
       }
     }
 
-    if (page < 1 ||(page * PAGE_SIZE) >= workOrderListHandle.recordSize) {
+    if (page < 1 || (page * PAGE_SIZE) >= workOrderListHandle.recordSize) {
       transactionLogger.info(
           "Requested page {} of work order list for branch {} exceeds record size {}",
           page, workOrderListHandle.branch, workOrderListHandle.recordSize)
@@ -163,7 +163,7 @@ Each page contains up to 1000 records."""
 
     log.debug("[createWorkOrder] Creating work order {}:{}", request.assetNumber, request.description)
     val workOrder = WorkOrder(
-        orderNumber = Random.nextInt(100000),
+        orderNumber = Random.nextInt(1000, 9999),
         description = request.description,
         branch = request.branch,
         assetNumber = request.assetNumber,
