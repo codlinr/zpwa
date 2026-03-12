@@ -53,6 +53,7 @@ class DataService {
   private suspend fun generateRandomEquipmentList(branch: String, recordSize: Int): List<Equipment> {
     val rangeStart = kotlin.random.Random(branch.hashCode()).nextInt(10000, 1000000)
     val rangeEnd = rangeStart + (recordSize * 10)
+    log.debug("[generateRandomEquipmentList] Generating equipment list for branch {} with range {} to {}", branch, rangeStart, rangeEnd)
     val assetNumbers = (rangeStart until rangeEnd).shuffled().take(recordSize)
 
     return assetNumbers.map { assetNumber ->
@@ -68,14 +69,15 @@ class DataService {
 
   @CachePut(value = [CacheConfiguration.WORK_ORDER_CACHE], key = "#branch")
   suspend fun generateWorkOrderList(branch: String, equipmentList: List<Equipment>, recordSize: Int): List<WorkOrder> {
-    log.debug("[generateWorkOrderList] Generating work order list for branch {}", branch)
-    val rangeStart = kotlin.random.Random(branch.hashCode()).nextInt(9999999, 10000000)
+    val rangeStart = kotlin.random.Random(branch.hashCode()).nextInt(9999999, 100000000)
+    log.debug("[generateWorkOrderList] Generating work order list for branch {} with range {}", branch, rangeStart)
 
     return (1..recordSize).map { index ->
       val equipment = equipmentList.random()
+      val orderNumber = index + (rangeStart)
       WorkOrder(
-          orderNumber = index + (rangeStart),
-          description = "Work Order ${index + (rangeStart)}",
+          orderNumber = orderNumber,
+          description = "Work Order $orderNumber",
           branch = branch,
           assetNumber = equipment.assetNumber,
           status = when (index % 3) {
