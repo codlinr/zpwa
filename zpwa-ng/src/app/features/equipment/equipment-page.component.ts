@@ -1,12 +1,17 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { DecimalPipe, NgIf, NgFor } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
 
 import { EquipmentService } from './equipment.service';
-import { EquipmentPage } from './equipment.model';
+import { Equipment, EquipmentPage } from './equipment.model';
 import { AuthService } from '../../core/services/auth.service';
 import { NetworkStateService } from '../../core/services/network-state.service';
-import { getEquipmentCache, saveEquipmentCache } from '../../core/services/indexeddb.service';
+import {
+  getEquipmentCache,
+  saveEquipmentCache,
+  saveAllEquipmentRows,
+} from '../../core/services/indexeddb.service';
 
 @Component({
   selector: 'app-equipment-page',
@@ -14,7 +19,7 @@ import { getEquipmentCache, saveEquipmentCache } from '../../core/services/index
   imports: [NgIf, NgFor, FormsModule, DecimalPipe],
   templateUrl: './equipment-page.component.html',
 })
-export class EquipmentPageComponent implements OnInit {
+export class EquipmentPageComponent implements OnInit, OnDestroy {
   private readonly equipmentService = inject(EquipmentService);
   private readonly auth = inject(AuthService);
   protected readonly networkState = inject(NetworkStateService);
@@ -33,6 +38,14 @@ export class EquipmentPageComponent implements OnInit {
   ngOnInit() {
     if (!this.auth.isAuthenticated()) {
       this.error = 'Please sign in to load equipment.';
+    }
+  }
+
+  ngOnDestroy() {
+    // Persist current page to IndexedDB when navigating away so it's available when returning offline
+    const p = this.page();
+    if (p && Array.isArray(p.records)) {
+      saveEquipmentCache(this.branch, p).catch(() => {});
     }
   }
 
@@ -85,6 +98,43 @@ export class EquipmentPageComponent implements OnInit {
     return (this.pageNumber - 1) * pagesPerServerPage + this.viewPageIndex() + 1;
   }
 
+  private async prefetchAllEquipmentForBranch(initialPage: EquipmentPage) {
+    const branch = this.branch;
+    // Start with the records we already have
+    const allRecords: Equipment[] = [...initialPage.records];
+    let handle = initialPage.handle;
+    const pageSize = initialPage.pageSize;
+    let currentPage = initialPage.pageNumber;
+    const total = initialPage.recordSize;
+
+    // Fetch subsequent pages until we've retrieved all records (or the API stops returning data)
+    while (allRecords.length < total) {
+      const nextPage = currentPage + 1;
+      try {
+        const next = await firstValueFrom(
+          this.equipmentService.list({
+            branch: undefined,
+            handle,
+            page: nextPage,
+          }),
+        );
+        if (!next.records.length) break;
+        allRecords.push(...next.records);
+        handle = next.handle;
+        currentPage = next.pageNumber;
+        if (next.records.length < pageSize) {
+          // Last page (fewer than pageSize records)
+          break;
+        }
+      } catch {
+        // Stop prefetching on any error; we still have a partial set cached
+        break;
+      }
+    }
+
+    await saveAllEquipmentRows(branch, allRecords);
+  }
+
   private async loadPage(direction?: 'prev') {
     if (!this.auth.isAuthenticated()) {
       this.error = 'Please sign in to load equipment.';
@@ -95,14 +145,15 @@ export class EquipmentPageComponent implements OnInit {
     this.error = undefined;
     this.showingCachedData.set(false);
 
-    // If offline, try to load from cache first
+    // If offline, try to load from cache first (or use in-memory data if cache lookup fails)
     if (this.networkState.isOffline()) {
       const cache = await getEquipmentCache(this.branch);
-      if (cache && cache.data) {
-        this.page.set(cache.data);
-        this.handle = cache.data.handle;
+      const source = cache?.data ?? this.page();
+      if (source && Array.isArray(source.records)) {
+        this.page.set(source);
+        this.handle = source.handle;
         if (direction === 'prev') {
-          const last = Math.ceil(cache.data.records.length / this.viewPageSize) - 1;
+          const last = Math.ceil(source.records.length / this.viewPageSize) - 1;
           this.viewPageIndex.set(Math.max(0, last));
         } else {
           this.viewPageIndex.set(0);
@@ -110,11 +161,10 @@ export class EquipmentPageComponent implements OnInit {
         this.loading.set(false);
         this.showingCachedData.set(true);
         return;
-      } else {
-        this.loading.set(false);
-        this.error = 'No cached data available. Please load equipment while online first.';
-        return;
       }
+      this.loading.set(false);
+      this.error = 'No cached data available. Please load equipment while online first.';
+      return;
     }
 
     // Online: fetch from backend and cache it
@@ -126,6 +176,8 @@ export class EquipmentPageComponent implements OnInit {
       })
       .subscribe({
         next: async (page) => {
+          // Save first page to cache so it's available before UI updates (avoids race when toggling offline)
+          await saveEquipmentCache(this.branch, page);
           this.page.set(page);
           this.handle = page.handle;
           if (direction === 'prev') {
@@ -134,19 +186,24 @@ export class EquipmentPageComponent implements OnInit {
           } else {
             this.viewPageIndex.set(0);
           }
-          // Cache the data for offline use
-          await saveEquipmentCache(this.branch, page);
           this.loading.set(false);
           this.showingCachedData.set(false);
+
+          // In the background, prefetch all pages for this branch and store them row-wise in IndexedDB.
+          // This ensures offline mode has the full dataset, not just the first page.
+          if (!this.handle || this.pageNumber === 1) {
+            this.prefetchAllEquipmentForBranch(page).catch(() => {});
+          }
         },
         error: async (err) => {
           this.loading.set(false);
           if (err.status === 0 || err.status === undefined) {
-            // Network error - try cache as fallback
+            // Network error - try cache or in-memory as fallback
             const cache = await getEquipmentCache(this.branch);
-            if (cache && cache.data) {
-              this.page.set(cache.data);
-              this.handle = cache.data.handle;
+            const source = cache?.data ?? this.page();
+            if (source && Array.isArray(source.records)) {
+              this.page.set(source);
+              this.handle = source.handle;
               this.viewPageIndex.set(0);
               this.showingCachedData.set(true);
             } else {
@@ -163,4 +220,3 @@ export class EquipmentPageComponent implements OnInit {
       });
   }
 }
-

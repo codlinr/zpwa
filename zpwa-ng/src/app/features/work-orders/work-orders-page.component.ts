@@ -1,13 +1,19 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { DecimalPipe, NgIf, NgFor } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
 
 import { WorkOrderService } from './work-order.service';
 import { WorkOrder, WorkOrderPage, WorkOrderRequest } from './work-order.model';
 import { AuthService } from '../../core/services/auth.service';
 import { OfflineQueueService } from '../../core/services/offline-queue.service';
 import { NetworkStateService } from '../../core/services/network-state.service';
-import { getWorkOrdersCache, saveWorkOrdersCache } from '../../core/services/indexeddb.service';
+import {
+  getWorkOrdersCache,
+  saveWorkOrdersCache,
+  saveAllWorkOrderRows,
+  equipmentAssetExists,
+} from '../../core/services/indexeddb.service';
 
 @Component({
   selector: 'app-work-orders-page',
@@ -15,7 +21,7 @@ import { getWorkOrdersCache, saveWorkOrdersCache } from '../../core/services/ind
   imports: [NgIf, NgFor, FormsModule, DecimalPipe],
   templateUrl: './work-orders-page.component.html',
 })
-export class WorkOrdersPageComponent implements OnInit {
+export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   private readonly workOrders = inject(WorkOrderService);
   private readonly auth = inject(AuthService);
   protected readonly offlineQueue = inject(OfflineQueueService);
@@ -35,7 +41,7 @@ export class WorkOrdersPageComponent implements OnInit {
 
   syncing = signal(false);
   creating = signal(false);
-  
+
   // Track newly created orders (created in current session, not yet in backend list)
   private readonly newlyCreatedOrders = signal<WorkOrder[]>([]);
 
@@ -53,6 +59,14 @@ export class WorkOrdersPageComponent implements OnInit {
   ngOnInit() {
     if (!this.auth.isAuthenticated()) {
       this.error = 'Please sign in to work with work orders.';
+    }
+  }
+
+  ngOnDestroy() {
+    // Persist current page to IndexedDB when navigating away so it's available when returning offline
+    const p = this.page();
+    if (p && Array.isArray(p.records)) {
+      saveWorkOrdersCache(this.branch, p).catch(() => {});
     }
   }
 
@@ -107,7 +121,11 @@ export class WorkOrdersPageComponent implements OnInit {
   }
 
   hasListContent(): boolean {
-    return !!this.page() || this.getPendingCreatedOrders().length > 0 || this.newlyCreatedOrders().length > 0;
+    return (
+      !!this.page() ||
+      this.getPendingCreatedOrders().length > 0 ||
+      this.newlyCreatedOrders().length > 0
+    );
   }
 
   isPendingOrder(order: WorkOrder): boolean {
@@ -132,6 +150,43 @@ export class WorkOrdersPageComponent implements OnInit {
     return (this.pageNumber - 1) * pagesPerServerPage + this.viewPageIndex() + 1;
   }
 
+  private async prefetchAllWorkOrdersForBranch(initialPage: WorkOrderPage) {
+    const branch = this.branch;
+    // Start with the records we already have
+    const allRecords: WorkOrder[] = [...initialPage.records];
+    let handle = initialPage.handle;
+    const pageSize = initialPage.pageSize;
+    let currentPage = initialPage.pageNumber;
+    const total = initialPage.recordSize;
+
+    // Fetch subsequent pages until we've retrieved all records (or the API stops returning data)
+    while (allRecords.length < total) {
+      const nextPage = currentPage + 1;
+      try {
+        const next = await firstValueFrom(
+          this.workOrders.list({
+            branch: undefined,
+            handle,
+            page: nextPage,
+          }),
+        );
+        if (!next.records.length) break;
+        allRecords.push(...next.records);
+        handle = next.handle;
+        currentPage = next.pageNumber;
+        if (next.records.length < pageSize) {
+          // Last page (fewer than pageSize records)
+          break;
+        }
+      } catch {
+        // Stop prefetching on any error; we still have a partial set cached
+        break;
+      }
+    }
+
+    await saveAllWorkOrderRows(branch, allRecords);
+  }
+
   private async loadPage(direction?: 'prev') {
     if (!this.auth.isAuthenticated()) {
       this.error = 'Please sign in to work with work orders.';
@@ -142,14 +197,15 @@ export class WorkOrdersPageComponent implements OnInit {
     this.error = undefined;
     this.showingCachedData.set(false);
 
-    // If offline, try to load from cache first
+    // If offline, try to load from cache first (or use in-memory data if cache lookup fails)
     if (this.networkState.isOffline()) {
       const cache = await getWorkOrdersCache(this.branch);
-      if (cache && cache.data) {
-        // Apply any pending status updates to cached data
-        const updatedRecords = this.applyPendingStatusUpdates(cache.data.records);
+      const source = cache?.data ?? this.page();
+      if (source && Array.isArray(source.records)) {
+        // Apply any pending status updates to the records
+        const updatedRecords = this.applyPendingStatusUpdates(source.records);
         const cachedPage: WorkOrderPage = {
-          ...cache.data,
+          ...source,
           records: updatedRecords,
         };
         this.page.set(cachedPage);
@@ -162,13 +218,14 @@ export class WorkOrdersPageComponent implements OnInit {
         }
         this.loading.set(false);
         this.showingCachedData.set(true);
-        this.syncMessage = 'Showing cached data (offline mode).';
-        return;
-      } else {
-        this.loading.set(false);
-        this.error = 'No cached data available. Please load work orders while online first.';
+        this.syncMessage = cache
+          ? 'Showing cached data (offline mode).'
+          : 'Showing in-memory data (offline mode). Load list while online to cache for offline.';
         return;
       }
+      this.loading.set(false);
+      this.error = 'No cached data available. Please load work orders while online first.';
+      return;
     }
 
     // Online: fetch from backend and cache it
@@ -180,6 +237,8 @@ export class WorkOrdersPageComponent implements OnInit {
       })
       .subscribe({
         next: async (page) => {
+          // Save first page to cache so it's available before UI updates (avoids race when toggling offline)
+          await saveWorkOrdersCache(this.branch, page);
           this.page.set(page);
           this.handle = page.handle;
           if (direction === 'prev') {
@@ -188,10 +247,14 @@ export class WorkOrdersPageComponent implements OnInit {
           } else {
             this.viewPageIndex.set(0);
           }
-          // Cache the data for offline use
-          await saveWorkOrdersCache(this.branch, page);
           this.loading.set(false);
           this.showingCachedData.set(false);
+
+          // In the background, prefetch all pages for this branch and store them row-wise in IndexedDB.
+          // This ensures offline mode has the full dataset, not just the first page.
+          if (!this.handle || this.pageNumber === 1) {
+            this.prefetchAllWorkOrdersForBranch(page).catch(() => {});
+          }
         },
         error: (err) => {
           this.loading.set(false);
@@ -211,10 +274,11 @@ export class WorkOrdersPageComponent implements OnInit {
 
   private async loadFromCacheFallback(direction?: 'prev') {
     const cache = await getWorkOrdersCache(this.branch);
-    if (cache && cache.data) {
-      const updatedRecords = this.applyPendingStatusUpdates(cache.data.records);
+    const source = cache?.data ?? this.page();
+    if (source && Array.isArray(source.records)) {
+      const updatedRecords = this.applyPendingStatusUpdates(source.records);
       const cachedPage: WorkOrderPage = {
-        ...cache.data,
+        ...source,
         records: updatedRecords,
       };
       this.page.set(cachedPage);
@@ -226,7 +290,9 @@ export class WorkOrdersPageComponent implements OnInit {
         this.viewPageIndex.set(0);
       }
       this.showingCachedData.set(true);
-      this.syncMessage = 'Showing cached data (backend unreachable).';
+      this.syncMessage = cache
+        ? 'Showing cached data (backend unreachable).'
+        : 'Showing in-memory data (backend unreachable).';
     } else {
       this.error = 'Backend is unreachable and no cached data available.';
     }
@@ -236,7 +302,9 @@ export class WorkOrdersPageComponent implements OnInit {
     // Get all pending status updates from the queue
     const pendingStatusOps = this.offlineQueue
       .pendingOps()
-      .filter((op) => op.type === 'status') as Array<{ payload: { orderNumber: number; status: string } }>;
+      .filter((op) => op.type === 'status') as Array<{
+      payload: { orderNumber: number; status: string };
+    }>;
 
     // Create a map of orderNumber -> new status
     const statusMap = new Map<number, string>();
@@ -267,8 +335,17 @@ export class WorkOrdersPageComponent implements OnInit {
     }
   }
 
-  createWorkOrder() {
+  async createWorkOrder() {
     if (!this.branch || !this.newDescription || !this.newAssetNumber) return;
+
+    // Validate asset number against local equipment records in IndexedDB
+    const isValidAsset = await equipmentAssetExists(this.branch, this.newAssetNumber);
+    if (!isValidAsset) {
+      this.error =
+        'Asset number is invalid. Please load equipment for this branch and use an existing asset.';
+      this.syncMessage = undefined;
+      return;
+    }
 
     const req: WorkOrderRequest = {
       branch: this.branch,
@@ -306,10 +383,10 @@ export class WorkOrdersPageComponent implements OnInit {
       next: (created: WorkOrder) => {
         this.newDescription = '';
         this.newAssetNumber = undefined;
-        
+
         // Add to newly created orders list (always visible at top, before pagination)
-        this.newlyCreatedOrders.update(orders => [created, ...orders]);
-        
+        this.newlyCreatedOrders.update((orders) => [created, ...orders]);
+
         // Also add to current page's records if page exists (for cache consistency)
         const currentPage = this.page();
         if (currentPage) {
@@ -324,14 +401,14 @@ export class WorkOrdersPageComponent implements OnInit {
           // Update cache with the new order
           saveWorkOrdersCache(this.branch, updatedPage).catch(() => {});
         }
-        
+
         // Reset to first view page to show the new order
         this.viewPageIndex.set(0);
-        
+
         this.syncMessage = `Order #${created.orderNumber} created successfully.`;
         this.error = undefined;
         clearLoader();
-        
+
         // Clear success message after 5 seconds
         setTimeout(() => {
           if (this.syncMessage?.includes('created successfully')) {
@@ -368,7 +445,7 @@ export class WorkOrdersPageComponent implements OnInit {
 
   async changeStatus(order: WorkOrder, status: string) {
     if (this.isPendingOrder(order)) return;
-    
+
     if (this.networkState.isOffline()) {
       try {
         await this.offlineQueue.addStatusUpdate(order.orderNumber, status);
@@ -509,4 +586,3 @@ export class WorkOrdersPageComponent implements OnInit {
     });
   }
 }
-

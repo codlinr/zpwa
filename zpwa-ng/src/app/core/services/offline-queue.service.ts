@@ -168,7 +168,9 @@ export class OfflineQueueService {
           if (realOrderNumber === null) {
             // Order not created yet (or creation failed), skip this status update
             result.failed++;
-            result.errors.push(`Status #${op.payload.orderNumber}: Order not found (may not be created yet)`);
+            result.errors.push(
+              `Status #${op.payload.orderNumber}: Order not found (may not be created yet)`,
+            );
             // Remove it anyway since we can't process it
             removeOp(op).catch(() => {});
             return of(undefined);
@@ -190,7 +192,9 @@ export class OfflineQueueService {
           if (realOrderNumber === null) {
             // Order not created yet (or creation failed), skip this image upload
             result.failed++;
-            result.errors.push(`Image #${op.payload.orderNumber}: Order not found (may not be created yet)`);
+            result.errors.push(
+              `Image #${op.payload.orderNumber}: Order not found (may not be created yet)`,
+            );
             // Remove it anyway since we can't process it
             removeOp(op).catch(() => {});
             return of(undefined);
