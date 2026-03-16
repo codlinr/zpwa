@@ -321,10 +321,7 @@ export async function saveAllEquipmentRows(branch: string, records: any[]): Prom
 // Check if an equipment asset exists in the local IndexedDB store for a given branch.
 // Returns true only if the row-wise store exists and contains at least one record
 // matching the provided (branch, assetNumber) key.
-export async function equipmentAssetExists(
-  branch: string,
-  assetNumber: number,
-): Promise<boolean> {
+export async function equipmentAssetExists(branch: string, assetNumber: number): Promise<boolean> {
   try {
     const keyBranch = normalizeBranch(branch);
     if (!keyBranch || assetNumber == null) return false;

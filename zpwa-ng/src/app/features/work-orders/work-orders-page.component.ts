@@ -49,6 +49,10 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   newDescription = '';
   newAssetNumber?: number;
 
+  // offline post-create update helpers (separate UI)
+  offlineUpdateOrderNumber?: number;
+  offlineUpdateStatus = 'PLANNED';
+
   // simple status update
   statuses = [
     { value: 'PLANNED', label: 'Planned' },
@@ -558,6 +562,41 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
         input.value = '';
       },
     });
+  }
+
+  async queueOfflineStatusUpdate() {
+    const orderNumber = this.offlineUpdateOrderNumber;
+    const status = this.offlineUpdateStatus;
+    if (!orderNumber || !status) return;
+
+    try {
+      await this.offlineQueue.addStatusUpdate(orderNumber, status);
+      this.syncMessage = `Status update for #${orderNumber} queued for sync.`;
+      this.error = undefined;
+    } catch {
+      this.error = 'Failed to queue status update locally.';
+    }
+  }
+
+  queueOfflineImageUpdate(event: Event) {
+    const orderNumber = this.offlineUpdateOrderNumber;
+    if (!orderNumber) return;
+
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    this.offlineQueue
+      .addImage(orderNumber, file)
+      .then(() => {
+        this.syncMessage = `Photo for #${orderNumber} queued for sync.`;
+        this.error = undefined;
+      })
+      .catch(() => {
+        this.error = 'Failed to queue photo locally.';
+      });
+
+    input.value = '';
   }
 
   runSync() {

@@ -60,6 +60,34 @@
     </div>
   </section>
 
+  <section class="offline-post-create" *ngIf="networkState.isOffline()">
+    <h3>Offline updates for created orders</h3>
+    <p class="hint">
+      Use this section to queue status changes or photo uploads for orders that will exist
+      after sync (use the positive order number).
+    </p>
+
+    <label>
+      Order number
+      <input type="number" [(ngModel)]="offlineUpdateOrderNumber" />
+    </label>
+
+    <div class="offline-update-row">
+      <label>
+        Status
+        <select [(ngModel)]="offlineUpdateStatus">
+          <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
+        </select>
+      </label>
+      <button type="button" (click)="queueOfflineStatusUpdate()">Queue status update</button>
+    </div>
+
+    <label class="upload">
+      Attach photo
+      <input type="file" accept="image/*" (change)="queueOfflineImageUpdate($event)" />
+    </label>
+  </section>
+
   <p *ngIf="error" class="error">{{ error }}</p>
 
   <section *ngIf="hasListContent()" class="list-section">

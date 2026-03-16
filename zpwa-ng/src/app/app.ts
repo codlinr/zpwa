@@ -12,7 +12,7 @@ import { NetworkStateService } from './core/services/network-state.service';
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, NgIf],
   templateUrl: './app.html',
-  styleUrl: './app.scss'
+  styleUrl: './app.scss',
 })
 export class App implements OnInit {
   private readonly system = inject(SystemService);
