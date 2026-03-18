@@ -30,62 +30,67 @@
     📦 Showing cached data (offline mode)
   </p>
 
-  <section class="controls">
-    <label>
-      Branch
-      <input [(ngModel)]="branch" />
-    </label>
-
-    <button type="button" (click)="loadFirstPage()">Load list</button>
-  </section>
-
-  <section class="create">
-    <h3>Create work order</h3>
-
-    <label>
-      Asset number
-      <input type="number" [(ngModel)]="newAssetNumber" />
-    </label>
-
-    <label>
-      Description
-      <input [(ngModel)]="newDescription" />
-    </label>
-
-    <div class="create-actions">
-      <button type="button" (click)="createWorkOrder()" [disabled]="creating()">
-        {{ creating() ? 'Creating…' : 'Create' }}
-      </button>
-      <span class="create-loader" *ngIf="creating()">Creating order…</span>
-    </div>
-  </section>
-
-  <section class="offline-post-create" *ngIf="networkState.isOffline()">
-    <h3>Offline updates for created orders</h3>
-    <p class="hint">
-      Use this section to queue status changes or photo uploads for orders that will exist
-      after sync (use the positive order number).
-    </p>
-
-    <label>
-      Order number
-      <input type="number" [(ngModel)]="offlineUpdateOrderNumber" />
-    </label>
-
-    <div class="offline-update-row">
+  <section
+    class="work-orders-top"
+    [class.has-offline-updates]="networkState.isOffline()"
+  >
+    <section class="controls">
       <label>
-        Status
-        <select [(ngModel)]="offlineUpdateStatus">
-          <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
-        </select>
+        Branch
+        <input [(ngModel)]="branch" />
       </label>
-      <button type="button" (click)="queueOfflineStatusUpdate()">Queue status update</button>
-    </div>
 
-    <label class="upload">
-      Attach photo
-      <input type="file" accept="image/*" (change)="queueOfflineImageUpdate($event)" />
-    </label>
+      <button type="button" (click)="loadFirstPage()">Load list</button>
+    </section>
+
+    <section class="create">
+      <h3>Create work order</h3>
+
+      <label>
+        Asset number
+        <input type="number" [(ngModel)]="newAssetNumber" />
+      </label>
+
+      <label>
+        Description
+        <input [(ngModel)]="newDescription" />
+      </label>
+
+      <div class="create-actions">
+        <button type="button" (click)="createWorkOrder()" [disabled]="creating()">
+          {{ creating() ? 'Creating…' : 'Create' }}
+        </button>
+        <span class="create-loader" *ngIf="creating()">Creating order…</span>
+      </div>
+    </section>
+
+    <section class="offline-post-create" *ngIf="networkState.isOffline()">
+      <h3>Offline updates</h3>
+      <p class="hint">
+        Queue status changes or photo uploads for orders that will exist after sync (use the
+        positive order number).
+      </p>
+
+      <label>
+        Order number
+        <input type="number" [(ngModel)]="offlineUpdateOrderNumber" />
+      </label>
+
+      <div class="offline-update-row">
+        <label>
+          Status
+          <select [(ngModel)]="offlineUpdateStatus">
+            <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
+          </select>
+        </label>
+        <button type="button" (click)="queueOfflineStatusUpdate()">Queue status update</button>
+      </div>
+
+      <label class="upload">
+        Attach photo
+        <input type="file" accept="image/*" (change)="queueOfflineImageUpdate($event)" />
+      </label>
+    </section>
   </section>
 
   <p *ngIf="error" class="error">{{ error }}</p>
@@ -103,12 +108,14 @@
             <span>Status:</span>
             <select
               *ngIf="isRegularOrder(order)"
-              [ngModel]="order.status"
+              [ngModel]="normalizeStatusValue(order.status)"
               (ngModelChange)="changeStatus(order, $event)"
             >
               <option *ngFor="let s of statuses" [value]="s.value">{{ s.label }}</option>
             </select>
-            <span *ngIf="isPendingOrder(order)" class="status-text">{{ order.status }}</span>
+            <span *ngIf="isPendingOrder(order)" class="status-text">{{
+              statusLabel(order.status)
+            }}</span>
           </div>
         </div>
 

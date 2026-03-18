@@ -40,9 +40,7 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(1200px 800px at 20% -10%, rgba(110, 168, 254, 0.15), transparent),
-    radial-gradient(1000px 700px at 100% 0%, rgba(45, 212, 191, 0.12), transparent),
-    var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-family:
     system-ui,
@@ -204,6 +202,44 @@ button:disabled {
   padding: var(--space-4);
 }
 
+.work-orders-top {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.offline-post-create {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.offline-post-create h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.offline-post-create .hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.offline-update-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.offline-update-row button {
+  width: fit-content;
+}
+
 .controls {
   display: grid;
   gap: var(--space-3);
@@ -347,6 +383,15 @@ button:disabled {
 }
 
 @media (min-width: 760px) {
+  .work-orders-top {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+
+  .work-orders-top.has-offline-updates {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
   .controls {
     grid-template-columns: 1fr auto;
     align-items: end;

@@ -57,8 +57,22 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   statuses = [
     { value: 'PLANNED', label: 'Planned' },
     { value: 'IN_PROGRESS', label: 'In progress' },
+    { value: 'ON_HOLD', label: 'On hold' },
     { value: 'COMPLETED', label: 'Completed' },
   ];
+
+  normalizeStatusValue(status?: string): string {
+    const raw = (status ?? '').toString().trim();
+    if (!raw) return 'PLANNED';
+    const upper = raw.toUpperCase();
+    const allowed = new Set(this.statuses.map((s) => s.value));
+    return allowed.has(upper) ? upper : 'PLANNED';
+  }
+
+  statusLabel(status?: string): string {
+    const normalized = this.normalizeStatusValue(status);
+    return this.statuses.find((s) => s.value === normalized)?.label ?? normalized;
+  }
 
   ngOnInit() {
     if (!this.auth.isAuthenticated()) {
@@ -207,7 +221,10 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
       const source = cache?.data ?? this.page();
       if (source && Array.isArray(source.records)) {
         // Apply any pending status updates to the records
-        const updatedRecords = this.applyPendingStatusUpdates(source.records);
+        const updatedRecords = this.applyPendingStatusUpdates(source.records).map((o) => ({
+          ...o,
+          status: this.normalizeStatusValue(o.status),
+        }));
         const cachedPage: WorkOrderPage = {
           ...source,
           records: updatedRecords,
@@ -242,8 +259,12 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: async (page) => {
           // Save first page to cache so it's available before UI updates (avoids race when toggling offline)
-          await saveWorkOrdersCache(this.branch, page);
-          this.page.set(page);
+          const normalizedPage: WorkOrderPage = {
+            ...page,
+            records: page.records.map((o) => ({ ...o, status: this.normalizeStatusValue(o.status) })),
+          };
+          await saveWorkOrdersCache(this.branch, normalizedPage);
+          this.page.set(normalizedPage);
           this.handle = page.handle;
           if (direction === 'prev') {
             const last = Math.ceil(page.records.length / this.viewPageSize) - 1;
@@ -257,7 +278,7 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
           // In the background, prefetch all pages for this branch and store them row-wise in IndexedDB.
           // This ensures offline mode has the full dataset, not just the first page.
           if (!this.handle || this.pageNumber === 1) {
-            this.prefetchAllWorkOrdersForBranch(page).catch(() => {});
+            this.prefetchAllWorkOrdersForBranch(normalizedPage).catch(() => {});
           }
         },
         error: (err) => {
@@ -280,7 +301,10 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     const cache = await getWorkOrdersCache(this.branch);
     const source = cache?.data ?? this.page();
     if (source && Array.isArray(source.records)) {
-      const updatedRecords = this.applyPendingStatusUpdates(source.records);
+      const updatedRecords = this.applyPendingStatusUpdates(source.records).map((o) => ({
+        ...o,
+        status: this.normalizeStatusValue(o.status),
+      }));
       const cachedPage: WorkOrderPage = {
         ...source,
         records: updatedRecords,
@@ -320,9 +344,9 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     return records.map((order) => {
       const newStatus = statusMap.get(order.orderNumber);
       if (newStatus) {
-        return { ...order, status: newStatus };
+        return { ...order, status: this.normalizeStatusValue(newStatus) };
       }
-      return order;
+      return { ...order, status: this.normalizeStatusValue(order.status) };
     });
   }
 
