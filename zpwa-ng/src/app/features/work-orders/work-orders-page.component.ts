@@ -28,6 +28,7 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   protected readonly networkState = inject(NetworkStateService);
 
   readonly viewPageSize = 20;
+  private destroyed = false;
 
   branch = 'NZ01';
   pageNumber = 1;
@@ -88,10 +89,13 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    this.destroyed = true;
     // Persist current page to IndexedDB when navigating away so it's available when returning offline
     const p = this.page();
     if (p && Array.isArray(p.records)) {
-      saveWorkOrdersCache(this.branch, p).catch(() => {});
+      saveWorkOrdersCache(this.branch, p).catch((err) => {
+        console.error('[WorkOrders] Failed to persist cache on destroy:', err);
+      });
     }
   }
 
@@ -198,6 +202,8 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
 
     // Fetch subsequent pages until we've retrieved all records (or the API stops returning data)
     while (allRecords.length < total) {
+      // Stop prefetching if the component was destroyed (user navigated away)
+      if (this.destroyed) return;
       const nextPage = currentPage + 1;
       try {
         const next = await firstValueFrom(
@@ -297,7 +303,9 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
           // In the background, prefetch all pages for this branch and store them row-wise in IndexedDB.
           // This ensures offline mode has the full dataset, not just the first page.
           if (!this.handle || this.pageNumber === 1) {
-            this.prefetchAllWorkOrdersForBranch(normalizedPage).catch(() => {});
+            this.prefetchAllWorkOrdersForBranch(normalizedPage).catch((err) => {
+              console.error('[WorkOrders] Background prefetch failed:', err);
+            });
           }
         },
         error: (err) => {
@@ -467,7 +475,9 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
           };
           this.page.set(updatedPage);
           // Update cache with the new order
-          saveWorkOrdersCache(this.branch, updatedPage).catch(() => {});
+          saveWorkOrdersCache(this.branch, updatedPage).catch((err) => {
+            console.error('[WorkOrders] Failed to update cache after create:', err);
+          });
         }
 
         // Reset to first view page to show the new order
@@ -702,9 +712,10 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
           await this.loadFirstPage();
         }
       },
-      error: () => {
+      error: (err) => {
         this.syncing.set(false);
-        this.error = 'Sync failed.';
+        console.error('[WorkOrders] Sync failed:', err);
+        this.error = `Sync failed: ${err?.message ?? 'Unknown error'}. Pending items will retry on next sync.`;
       },
     });
   }

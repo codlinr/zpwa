@@ -210,7 +210,9 @@ export class OfflineQueueService {
               `Status #${op.payload.orderNumber}: Order not found (may not be created yet)`,
             );
             // Remove it anyway since we can't process it
-            removeOp(op).catch(() => {});
+            removeOp(op).catch((err) => {
+              console.error('[OfflineQueue] Failed to remove skipped status op:', err);
+            });
             return of(undefined);
           }
           return workOrderService.updateStatus(realOrderNumber, op.payload.status).pipe(
@@ -234,7 +236,9 @@ export class OfflineQueueService {
               `Image #${op.payload.orderNumber}: Order not found (may not be created yet)`,
             );
             // Remove it anyway since we can't process it
-            removeOp(op).catch(() => {});
+            removeOp(op).catch((err) => {
+              console.error('[OfflineQueue] Failed to remove skipped image op:', err);
+            });
             return of(undefined);
           }
           const mime = op.payload.mimeType ?? 'image/jpeg';
@@ -267,7 +271,11 @@ export class OfflineQueueService {
         processOne(sortedOps[index]!).subscribe({
           next: () => run(index + 1),
           error: (err) => {
-            subscriber.error(err);
+            // Don't stop the entire sync — log the error and continue with the next operation
+            console.error('[OfflineQueue] Sync error for op:', sortedOps[index], err);
+            result.failed++;
+            result.errors.push(`Unexpected: ${err?.message ?? 'Unknown error'}`);
+            run(index + 1);
           },
         });
       };

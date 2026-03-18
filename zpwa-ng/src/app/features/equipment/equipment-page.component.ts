@@ -25,6 +25,7 @@ export class EquipmentPageComponent implements OnInit, OnDestroy {
   protected readonly networkState = inject(NetworkStateService);
 
   readonly viewPageSize = 20;
+  private destroyed = false;
 
   branch = 'NZ01';
   pageNumber = 1;
@@ -42,10 +43,13 @@ export class EquipmentPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    this.destroyed = true;
     // Persist current page to IndexedDB when navigating away so it's available when returning offline
     const p = this.page();
     if (p && Array.isArray(p.records)) {
-      saveEquipmentCache(this.branch, p).catch(() => {});
+      saveEquipmentCache(this.branch, p).catch((err) => {
+        console.error('[Equipment] Failed to persist cache on destroy:', err);
+      });
     }
   }
 
@@ -109,6 +113,8 @@ export class EquipmentPageComponent implements OnInit, OnDestroy {
 
     // Fetch subsequent pages until we've retrieved all records (or the API stops returning data)
     while (allRecords.length < total) {
+      // Stop prefetching if the component was destroyed (user navigated away)
+      if (this.destroyed) return;
       const nextPage = currentPage + 1;
       try {
         const next = await firstValueFrom(
@@ -192,7 +198,9 @@ export class EquipmentPageComponent implements OnInit, OnDestroy {
           // In the background, prefetch all pages for this branch and store them row-wise in IndexedDB.
           // This ensures offline mode has the full dataset, not just the first page.
           if (!this.handle || this.pageNumber === 1) {
-            this.prefetchAllEquipmentForBranch(page).catch(() => {});
+            this.prefetchAllEquipmentForBranch(page).catch((err) => {
+              console.error('[Equipment] Background prefetch failed:', err);
+            });
           }
         },
         error: async (err) => {

@@ -66,7 +66,8 @@ export async function loadFromIndexedDB(): Promise<OfflineOp[]> {
     const tx = db.transaction(STORE_QUEUE, 'readonly');
     const store = tx.objectStore(STORE_QUEUE);
     return await store.getAll();
-  } catch {
+  } catch (err) {
+    console.error('[IndexedDB] loadFromIndexedDB failed:', err);
     return [];
   }
 }
@@ -80,8 +81,8 @@ export async function saveToIndexedDB(ops: OfflineOp[]): Promise<void> {
     for (const op of ops) {
       await store.add(op);
     }
-  } catch {
-    // ignore quota or errors
+  } catch (err) {
+    console.error('[IndexedDB] saveToIndexedDB failed:', err);
   }
 }
 
@@ -91,8 +92,8 @@ export async function addToIndexedDB(op: OfflineOp): Promise<void> {
     const tx = db.transaction(STORE_QUEUE, 'readwrite');
     const store = tx.objectStore(STORE_QUEUE);
     await store.add(op);
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] addToIndexedDB failed:', err);
   }
 }
 
@@ -102,8 +103,8 @@ export async function removeFromIndexedDB(id: string): Promise<void> {
     const tx = db.transaction(STORE_QUEUE, 'readwrite');
     const store = tx.objectStore(STORE_QUEUE);
     await store.delete(id);
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] removeFromIndexedDB failed:', err);
   }
 }
 
@@ -194,8 +195,8 @@ export async function saveWorkOrdersCache(branch: string, data: any): Promise<vo
       data,
       cachedAt: Date.now(),
     });
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] saveWorkOrdersCache failed:', err);
   }
 }
 
@@ -216,8 +217,8 @@ export async function saveAllWorkOrderRows(branch: string, records: any[]): Prom
         branch: rec.branch ?? key,
       });
     }
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] saveAllWorkOrderRows failed:', err);
   }
 }
 
@@ -362,8 +363,8 @@ export async function saveEquipmentCache(branch: string, data: any): Promise<voi
       data,
       cachedAt: Date.now(),
     });
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] saveEquipmentCache failed:', err);
   }
 }
 
@@ -384,8 +385,8 @@ export async function saveAllEquipmentRows(branch: string, records: any[]): Prom
         branch: rec.branch ?? key,
       });
     }
-  } catch {
-    // ignore errors
+  } catch (err) {
+    console.error('[IndexedDB] saveAllEquipmentRows failed:', err);
   }
 }
 

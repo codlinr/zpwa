@@ -76,14 +76,15 @@ export class OfflineQueueInterceptor implements HttpInterceptor {
   }
 
   private queueRequest(req: HttpRequest<any>): Observable<HttpEvent<any>> {
-    const url = req.url;
+    // Strip query params so matching works regardless of ?branch=NZ01 etc.
+    const url = req.url.split('?')[0]!;
     const method = req.method;
 
     if (method === 'POST' && url === '/api/work-orders') {
       const payload = req.body as WorkOrderRequest;
       // Fire-and-forget async call
-      this.offlineQueue.addCreate(payload).catch(() => {
-        // Silently handle errors
+      this.offlineQueue.addCreate(payload).catch((err) => {
+        console.error('[OfflineQueue] Failed to queue create:', err);
       });
       return of(new HttpResponse({ status: 202, body: { queued: true } }));
     }
@@ -93,8 +94,8 @@ export class OfflineQueueInterceptor implements HttpInterceptor {
       const orderNumber = parseInt(match![1]!, 10);
       const status = req.params.get('status') || '';
       // Fire-and-forget async call
-      this.offlineQueue.addStatusUpdate(orderNumber, status).catch(() => {
-        // Silently handle errors
+      this.offlineQueue.addStatusUpdate(orderNumber, status).catch((err) => {
+        console.error('[OfflineQueue] Failed to queue status update:', err);
       });
       return of(new HttpResponse({ status: 202, body: { queued: true } }));
     }
@@ -106,8 +107,8 @@ export class OfflineQueueInterceptor implements HttpInterceptor {
       const file = formData.get('imageFile') as File;
       if (file) {
         // Fire-and-forget async call
-        this.offlineQueue.addImage(orderNumber, file).catch(() => {
-          // Silently handle errors
+        this.offlineQueue.addImage(orderNumber, file).catch((err) => {
+          console.error('[OfflineQueue] Failed to queue image:', err);
         });
       }
       return of(new HttpResponse({ status: 202, body: { queued: true } }));
