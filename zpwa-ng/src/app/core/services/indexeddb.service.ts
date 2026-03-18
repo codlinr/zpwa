@@ -207,15 +207,23 @@ export async function saveAllWorkOrderRows(branch: string, records: any[]): Prom
     if (!key || !records?.length) return;
     const db = await getDB();
     if (!db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) return;
-    const tx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readwrite');
-    const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
-    // For simplicity, clear and repopulate. This keeps the store aligned with backend.
-    await store.clear();
-    for (const rec of records) {
-      await store.put({
-        ...rec,
-        branch: rec.branch ?? key,
-      });
+
+    // Clear existing records first
+    const clearTx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readwrite');
+    await clearTx.objectStore(STORE_WORK_ORDER_RECORDS).clear();
+
+    // Write in batches of 5000 to avoid transaction timeout on large datasets
+    const BATCH_SIZE = 5000;
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      const tx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readwrite');
+      const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
+      for (const rec of batch) {
+        await store.put({
+          ...rec,
+          branch: rec.branch ?? key,
+        });
+      }
     }
   } catch (err) {
     console.error('[IndexedDB] saveAllWorkOrderRows failed:', err);
@@ -375,36 +383,65 @@ export async function saveAllEquipmentRows(branch: string, records: any[]): Prom
     if (!key || !records?.length) return;
     const db = await getDB();
     if (!db.objectStoreNames.contains(STORE_EQUIPMENT_RECORDS)) return;
-    const tx = db.transaction(STORE_EQUIPMENT_RECORDS, 'readwrite');
-    const store = tx.objectStore(STORE_EQUIPMENT_RECORDS);
-    // For simplicity, clear and repopulate. This keeps the store aligned with backend.
-    await store.clear();
-    for (const rec of records) {
-      await store.put({
-        ...rec,
-        branch: rec.branch ?? key,
-      });
+
+    // Clear existing records first
+    const clearTx = db.transaction(STORE_EQUIPMENT_RECORDS, 'readwrite');
+    await clearTx.objectStore(STORE_EQUIPMENT_RECORDS).clear();
+
+    // Write in batches of 5000 to avoid transaction timeout on large datasets
+    const BATCH_SIZE = 5000;
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      const tx = db.transaction(STORE_EQUIPMENT_RECORDS, 'readwrite');
+      const store = tx.objectStore(STORE_EQUIPMENT_RECORDS);
+      for (const rec of batch) {
+        await store.put({
+          ...rec,
+          branch: rec.branch ?? key,
+        });
+      }
     }
   } catch (err) {
     console.error('[IndexedDB] saveAllEquipmentRows failed:', err);
   }
 }
 
-// Check if an equipment asset exists in the local IndexedDB store for a given branch.
-// Returns true only if the row-wise store exists and contains at least one record
-// matching the provided (branch, assetNumber) key.
+// Check if an equipment asset exists in the local IndexedDB stores.
+// Checks page-cache first (fast, never locked), then row-wise store.
 export async function equipmentAssetExists(branch: string, assetNumber: number): Promise<boolean> {
   try {
     const keyBranch = normalizeBranch(branch);
     if (!keyBranch || assetNumber == null) return false;
     const db = await getDB();
-    if (!db.objectStoreNames.contains(STORE_EQUIPMENT_RECORDS)) return false;
-    const tx = db.transaction(STORE_EQUIPMENT_RECORDS, 'readonly');
-    const store = tx.objectStore(STORE_EQUIPMENT_RECORDS);
-    const key = [keyBranch, assetNumber] as IDBValidKey;
-    const found = await store.get(key);
-    return !!found;
-  } catch {
+
+    // 1. Check page-cache store first (equipmentCache) — fast and never blocked
+    //    by background prefetch writes to the row-wise store.
+    if (db.objectStoreNames.contains(STORE_EQUIPMENT_CACHE)) {
+      const tx = db.transaction(STORE_EQUIPMENT_CACHE, 'readonly');
+      const store = tx.objectStore(STORE_EQUIPMENT_CACHE);
+      const allCaches = (await store.getAll()) ?? [];
+      for (const cache of allCaches) {
+        const records = cache?.data?.records;
+        if (Array.isArray(records)) {
+          if (records.some((r: any) => r && r.assetNumber === assetNumber && r.branch === keyBranch)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    // 2. Fallback: check row-wise store (equipmentRecords)
+    if (db.objectStoreNames.contains(STORE_EQUIPMENT_RECORDS)) {
+      const tx = db.transaction(STORE_EQUIPMENT_RECORDS, 'readonly');
+      const store = tx.objectStore(STORE_EQUIPMENT_RECORDS);
+      const key = [keyBranch, assetNumber] as IDBValidKey;
+      const found = await store.get(key);
+      if (found) return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error('[IndexedDB] equipmentAssetExists failed:', err);
     return false;
   }
 }

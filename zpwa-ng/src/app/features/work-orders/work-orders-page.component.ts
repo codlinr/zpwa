@@ -415,11 +415,14 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     }
 
     // Validate asset number against local equipment records in IndexedDB
+    this.creating.set(true);
+    this.error = undefined;
+    this.syncMessage = undefined;
     const isValidAsset = await equipmentAssetExists(branch, assetNumber!);
     if (!isValidAsset) {
+      this.creating.set(false);
       this.error =
-        'Asset number is invalid. Please load equipment for this branch and use an existing asset.';
-      this.syncMessage = undefined;
+        'Asset number is invalid. Go to Equipment page → Load list first, then use a valid asset number.';
       return;
     }
 
