@@ -2,7 +2,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 import type { OfflineOp } from '../models/offline-queue.model';
 
 const DB_NAME = 'zpwa-offline-db';
-const DB_VERSION = 3; // Incremented for new stores / layouts
+const DB_VERSION = 4; // Incremented for new stores / layouts
 const STORE_QUEUE = 'queue';
 const STORE_WORK_ORDERS_CACHE = 'workOrdersCache';
 const STORE_EQUIPMENT_CACHE = 'equipmentCache';
@@ -15,7 +15,7 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
+      upgrade(db, oldVersion, _newVersion, tx) {
         // Queue store for offline operations
         if (!db.objectStoreNames.contains(STORE_QUEUE)) {
           db.createObjectStore(STORE_QUEUE, { keyPath: 'id' });
@@ -29,14 +29,29 @@ function getDB(): Promise<IDBPDatabase> {
         }
         // Row-wise stores: one object per record, keyed by (branch, id)
         if (!db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) {
-          db.createObjectStore(STORE_WORK_ORDER_RECORDS, {
+          const store = db.createObjectStore(STORE_WORK_ORDER_RECORDS, {
             keyPath: ['branch', 'orderNumber'],
           });
+          // Index to allow existence checks by orderNumber (across branches)
+          store.createIndex('orderNumber', 'orderNumber');
         }
         if (!db.objectStoreNames.contains(STORE_EQUIPMENT_RECORDS)) {
           db.createObjectStore(STORE_EQUIPMENT_RECORDS, {
             keyPath: ['branch', 'assetNumber'],
           });
+        }
+
+        // Ensure index exists when upgrading from older DB versions where the store
+        // existed but the index did not.
+        if (oldVersion < 4 && db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) {
+          try {
+            const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
+            if (!store.indexNames.contains('orderNumber')) {
+              store.createIndex('orderNumber', 'orderNumber');
+            }
+          } catch {
+            // ignore upgrade/index errors
+          }
         }
       },
     });
@@ -203,6 +218,45 @@ export async function saveAllWorkOrderRows(branch: string, records: any[]): Prom
     }
   } catch {
     // ignore errors
+  }
+}
+
+// Check if a work order exists in the local IndexedDB row-wise store.
+// - If branch is provided, checks that exact (branch, orderNumber) composite key.
+// - If branch is omitted, checks by orderNumber across all branches (via index when available).
+export async function workOrderExists(
+  orderNumber: number,
+  branch?: string,
+): Promise<boolean> {
+  try {
+    if (orderNumber == null) return false;
+    const db = await getDB();
+    if (!db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) return false;
+    const tx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readonly');
+    const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
+
+    const keyBranch = normalizeBranch(branch ?? '');
+    if (keyBranch) {
+      const key = [keyBranch, orderNumber] as IDBValidKey;
+      const found = await store.get(key);
+      return !!found;
+    }
+
+    // Cross-branch lookup: prefer index (fast), fall back to scan.
+    try {
+      if (store.indexNames.contains('orderNumber')) {
+        const idx = store.index('orderNumber');
+        const found = await idx.get(orderNumber as unknown as IDBValidKey);
+        return !!found;
+      }
+    } catch {
+      // ignore and fall back to scan
+    }
+
+    const all = (await store.getAll()) ?? [];
+    return all.some((r: any) => r && r.orderNumber === orderNumber);
+  } catch {
+    return false;
   }
 }
 

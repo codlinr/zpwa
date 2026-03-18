@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { DecimalPipe, NgIf, NgFor } from '@angular/common';
+import { NgIf, NgFor } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
@@ -16,7 +16,7 @@ import {
 @Component({
   selector: 'app-equipment-page',
   standalone: true,
-  imports: [NgIf, NgFor, FormsModule, DecimalPipe],
+  imports: [NgIf, NgFor, FormsModule],
   templateUrl: './equipment-page.component.html',
 })
 export class EquipmentPageComponent implements OnInit, OnDestroy {

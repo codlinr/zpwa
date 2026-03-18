@@ -9,6 +9,7 @@ import {
   saveToIndexedDB,
   addToIndexedDB,
   removeFromIndexedDB,
+  workOrderExists,
 } from './indexeddb.service';
 
 function base64FromFile(file: File): Promise<string> {
@@ -52,13 +53,29 @@ export class OfflineQueueService {
       .filter((op: OfflineOp): op is OfflineOpCreate => op.type === 'create')
       .filter((op: OfflineOpCreate) => !branch || op.payload.branch === branch)
       .map((op: OfflineOpCreate) => ({
-        orderNumber: -(op.createdAt % 2147483647), // Temporary negative ID for display
+        // Temporary *positive* ID for display/input.
+        // Internally we still store the queued ops with the negative form so sync can map it.
+        orderNumber: op.createdAt % 2147483647,
         branch: op.payload.branch,
         assetNumber: op.payload.assetNumber,
         description: op.payload.description,
         status: 'PLANNED',
         _pending: true, // Flag to mark as pending (not yet synced to backend)
       }));
+  }
+
+  /**
+   * Convert a positive "pending create" temp id back into the internal negative id.
+   * This lets the UI accept only positive numbers while still using the negative IDs
+   * for sync mapping.
+   */
+  private resolvePendingTempId(orderNumber: number): number {
+    if (orderNumber <= 0) return orderNumber;
+    const isPendingTempDisplayId = this.pending().some(
+      (op): op is OfflineOpCreate =>
+        op.type === 'create' && (op.createdAt % 2147483647) === orderNumber,
+    );
+    return isPendingTempDisplayId ? -orderNumber : orderNumber;
   }
 
   private async persist(ops: OfflineOp[]): Promise<void> {
@@ -84,11 +101,19 @@ export class OfflineQueueService {
 
   async addStatusUpdate(orderNumber: number, status: string): Promise<void> {
     await this.init();
+    const resolvedOrderNumber = this.resolvePendingTempId(orderNumber);
+    // Allow updates for pending locally-created orders (temporary negative IDs).
+    if (resolvedOrderNumber > 0) {
+      const exists = await workOrderExists(resolvedOrderNumber);
+      if (!exists) {
+        throw new Error(`Work order #${resolvedOrderNumber} not found in offline cache`);
+      }
+    }
     const op: OfflineOp = {
       id: crypto.randomUUID(),
       type: 'status',
       createdAt: Date.now(),
-      payload: { orderNumber, status },
+      payload: { orderNumber: resolvedOrderNumber, status },
     };
     await addToIndexedDB(op);
     this.pending.update((ops) => [...ops, op]);
@@ -96,12 +121,25 @@ export class OfflineQueueService {
 
   async addImage(orderNumber: number, file: File): Promise<void> {
     await this.init();
+    const resolvedOrderNumber = this.resolvePendingTempId(orderNumber);
+    // Allow images for pending locally-created orders (temporary negative IDs).
+    if (resolvedOrderNumber > 0) {
+      const exists = await workOrderExists(resolvedOrderNumber);
+      if (!exists) {
+        throw new Error(`Work order #${resolvedOrderNumber} not found in offline cache`);
+      }
+    }
     const base64 = await base64FromFile(file);
     const op: OfflineOp = {
       id: crypto.randomUUID(),
       type: 'image',
       createdAt: Date.now(),
-      payload: { orderNumber, fileName: file.name, base64, mimeType: file.type || 'image/jpeg' },
+      payload: {
+        orderNumber: resolvedOrderNumber,
+        fileName: file.name,
+        base64,
+        mimeType: file.type || 'image/jpeg',
+      },
     };
     await addToIndexedDB(op);
     this.pending.update((ops) => [...ops, op]);

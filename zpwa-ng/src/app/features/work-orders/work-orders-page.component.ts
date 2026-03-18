@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { DecimalPipe, NgIf, NgFor } from '@angular/common';
+import { NgIf, NgFor } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
@@ -18,7 +18,7 @@ import {
 @Component({
   selector: 'app-work-orders-page',
   standalone: true,
-  imports: [NgIf, NgFor, FormsModule, DecimalPipe],
+  imports: [NgIf, NgFor, FormsModule],
   templateUrl: './work-orders-page.component.html',
 })
 export class WorkOrdersPageComponent implements OnInit, OnDestroy {
@@ -363,11 +363,32 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  private formatMissingFieldsError(fields: string[]): string {
+    if (fields.length === 0) return '';
+    if (fields.length === 1) return `${fields[0]} is required.`;
+    if (fields.length === 2) return `${fields[0]} and ${fields[1]} are required.`;
+    const last = fields.pop()!;
+    return `${fields.join(', ')}, and ${last} are required.`;
+  }
+
   async createWorkOrder() {
-    if (!this.branch || !this.newDescription || !this.newAssetNumber) return;
+    const branch = (this.branch ?? '').toString().trim();
+    const description = (this.newDescription ?? '').toString().trim();
+    const assetNumber = this.newAssetNumber;
+
+    const missing: string[] = [];
+    if (!branch) missing.push('Branch');
+    if (!description) missing.push('Description');
+    if (!assetNumber) missing.push('Asset number');
+
+    if (missing.length > 0) {
+      this.error = this.formatMissingFieldsError(missing);
+      this.syncMessage = undefined;
+      return;
+    }
 
     // Validate asset number against local equipment records in IndexedDB
-    const isValidAsset = await equipmentAssetExists(this.branch, this.newAssetNumber);
+    const isValidAsset = await equipmentAssetExists(branch, assetNumber!);
     if (!isValidAsset) {
       this.error =
         'Asset number is invalid. Please load equipment for this branch and use an existing asset.';
@@ -376,9 +397,9 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     }
 
     const req: WorkOrderRequest = {
-      branch: this.branch,
-      assetNumber: this.newAssetNumber,
-      description: this.newDescription,
+      branch,
+      assetNumber: assetNumber!,
+      description,
     };
 
     if (this.networkState.isOffline()) {
@@ -591,33 +612,53 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   async queueOfflineStatusUpdate() {
     const orderNumber = this.offlineUpdateOrderNumber;
     const status = this.offlineUpdateStatus;
-    if (!orderNumber || !status) return;
+    const normalizedStatus = this.normalizeStatusValue(status);
+    const missing: string[] = [];
+    if (!orderNumber) missing.push('Order number');
+    if (!normalizedStatus) missing.push('Status');
+
+    if (missing.length > 0) {
+      this.error = this.formatMissingFieldsError(missing);
+      this.syncMessage = undefined;
+      return;
+    }
 
     try {
-      await this.offlineQueue.addStatusUpdate(orderNumber, status);
+      await this.offlineQueue.addStatusUpdate(orderNumber!, normalizedStatus);
       this.syncMessage = `Status update for #${orderNumber} queued for sync.`;
       this.error = undefined;
     } catch {
-      this.error = 'Failed to queue status update locally.';
+      this.error =
+        `Cannot queue status update for #${orderNumber}. ` +
+        `That work order is not in your offline cache (open/sync the list first).`;
     }
   }
 
   queueOfflineImageUpdate(event: Event) {
     const orderNumber = this.offlineUpdateOrderNumber;
-    if (!orderNumber) return;
-
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
-    if (!file) return;
+
+    const missing: string[] = [];
+    if (!orderNumber) missing.push('Order number');
+    if (!file) missing.push('Photo file');
+
+    if (missing.length > 0) {
+      this.error = this.formatMissingFieldsError(missing);
+      this.syncMessage = undefined;
+      return;
+    }
 
     this.offlineQueue
-      .addImage(orderNumber, file)
+      .addImage(orderNumber!, file!)
       .then(() => {
         this.syncMessage = `Photo for #${orderNumber} queued for sync.`;
         this.error = undefined;
       })
       .catch(() => {
-        this.error = 'Failed to queue photo locally.';
+        this.error =
+          `Cannot queue photo for #${orderNumber}. ` +
+          `That work order is not in your offline cache (open/sync the list first).`;
       });
 
     input.value = '';
