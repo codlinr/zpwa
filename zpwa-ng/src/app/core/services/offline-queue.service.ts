@@ -29,9 +29,12 @@ function base64FromFile(file: File): Promise<string> {
 export class OfflineQueueService {
   private readonly pending = signal<OfflineOp[]>([]);
   private initialized = false;
+  private _syncing = false;
 
   readonly pendingCount = computed(() => this.pending().length);
   readonly pendingOps = computed(() => [...this.pending()]);
+  /** True while sync is in progress — used to prevent interceptor from re-queuing. */
+  get isSyncing(): boolean { return this._syncing; }
 
   constructor() {
     this.init();
@@ -129,6 +132,16 @@ export class OfflineQueueService {
         throw new Error(`Work order #${resolvedOrderNumber} not found in offline cache`);
       }
     }
+
+    // Remove any existing queued image for the same order to prevent duplicates
+    const existingImageOp = this.pending().find(
+      (op) => op.type === 'image' && op.payload.orderNumber === resolvedOrderNumber,
+    );
+    if (existingImageOp) {
+      await removeFromIndexedDB(existingImageOp.id);
+      this.pending.update((ops) => ops.filter((op) => op.id !== existingImageOp.id));
+    }
+
     const base64 = await base64FromFile(file);
     const op: OfflineOp = {
       id: crypto.randomUUID(),
@@ -151,16 +164,22 @@ export class OfflineQueueService {
       return of({ synced: 0, failed: 0, errors: [] });
     }
 
+    this._syncing = true;
+
+    // Deduplicate: for status and image ops, keep only the latest per orderNumber.
+    // This prevents duplicate API calls if the same operation was queued multiple times.
+    const deduped = this.deduplicateOps(ops);
+
     // Sort operations: creates first, then status/image updates
     // This ensures orders exist before we try to update them
-    const sortedOps = [...ops].sort((a, b) => {
+    const sortedOps = [...deduped].sort((a, b) => {
       if (a.type === 'create' && b.type !== 'create') return -1;
       if (a.type !== 'create' && b.type === 'create') return 1;
       return a.createdAt - b.createdAt; // Within same type, preserve order
     });
 
     const result: SyncResult = { synced: 0, failed: 0, errors: [] };
-    let remaining = ops;
+    let remaining = deduped;
     // Map temporary negative order numbers to real order numbers
     const tempIdToRealId = new Map<number, number>();
 
@@ -261,18 +280,26 @@ export class OfflineQueueService {
       }
     };
 
+    console.log('[Sync] Starting sync with', sortedOps.length, 'ops:', sortedOps.map(o => `${o.type}:${(o.payload as any).orderNumber ?? 'create'}`));
+
     return new Observable<SyncResult>((subscriber) => {
       const run = (index: number) => {
         if (index >= sortedOps.length) {
+          this._syncing = false;
+          console.log('[Sync] COMPLETE. Result:', result);
           subscriber.next(result);
           subscriber.complete();
           return;
         }
-        processOne(sortedOps[index]!).subscribe({
-          next: () => run(index + 1),
+        const op = sortedOps[index]!;
+        console.log(`[Sync] Processing [${index}]: ${op.type} (id=${op.id})`);
+        processOne(op).subscribe({
+          next: () => {
+            console.log(`[Sync] Done [${index}]: ${op.type}`);
+            run(index + 1);
+          },
           error: (err) => {
-            // Don't stop the entire sync — log the error and continue with the next operation
-            console.error('[OfflineQueue] Sync error for op:', sortedOps[index], err);
+            console.error(`[Sync] ERROR [${index}]: ${op.type}`, err);
             result.failed++;
             result.errors.push(`Unexpected: ${err?.message ?? 'Unknown error'}`);
             run(index + 1);
@@ -281,6 +308,36 @@ export class OfflineQueueService {
       };
       run(0);
     });
+  }
+
+  /**
+   * Deduplicate operations: for status and image ops with the same orderNumber,
+   * keep only the latest one (by createdAt). Create ops are always kept.
+   */
+  private deduplicateOps(ops: OfflineOp[]): OfflineOp[] {
+    const seen = new Map<string, OfflineOp>();
+    const result: OfflineOp[] = [];
+
+    for (const op of ops) {
+      if (op.type === 'create') {
+        // Always keep all create ops
+        result.push(op);
+        continue;
+      }
+      // For status/image: use type+orderNumber as key, keep latest
+      const key = `${op.type}:${op.payload.orderNumber}`;
+      const existing = seen.get(key);
+      if (!existing || op.createdAt > existing.createdAt) {
+        seen.set(key, op);
+      }
+    }
+
+    // Add deduplicated status/image ops
+    for (const op of seen.values()) {
+      result.push(op);
+    }
+
+    return result;
   }
 
   private base64ToBlob(base64: string, mimeType: string): Blob {

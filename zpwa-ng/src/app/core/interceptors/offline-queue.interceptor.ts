@@ -65,6 +65,10 @@ export class OfflineQueueInterceptor implements HttpInterceptor {
         if (err instanceof HttpErrorResponse && (err.status === 0 || err.status === undefined)) {
           // Status 0 = backend unreachable (connection refused, network error, etc.)
           this.networkState.markBackendUnreachable();
+          // Don't re-queue if this request came FROM the sync process
+          if (this.offlineQueue.isSyncing) {
+            return throwError(() => err);
+          }
           // Queue the request for later sync
           return this.queueRequest(req);
         }

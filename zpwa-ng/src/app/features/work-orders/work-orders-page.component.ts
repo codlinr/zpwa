@@ -444,6 +444,9 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
         })
         .catch(() => {
           this.error = 'Backend is unreachable and order could not be queued locally.';
+        })
+        .finally(() => {
+          this.creating.set(false);
         });
       return;
     }
@@ -526,6 +529,15 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
 
   async changeStatus(order: WorkOrder, status: string) {
     if (this.isPendingOrder(order)) return;
+    if (this.syncing()) {
+      console.warn('[changeStatus] BLOCKED — sync in progress, order:', order.orderNumber, status);
+      return;
+    }
+    if (this.normalizeStatusValue(order.status) === status) {
+      console.log('[changeStatus] SKIPPED — same value, order:', order.orderNumber, status);
+      return;
+    }
+    console.log('[changeStatus] EXECUTING — order:', order.orderNumber, 'from', order.status, 'to', status);
 
     if (this.networkState.isOffline()) {
       try {
@@ -599,6 +611,7 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
 
   uploadImage(order: WorkOrder, event: Event) {
     if (this.isPendingOrder(order)) return;
+    if (this.syncing()) return;
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
     if (!file) return;
@@ -697,13 +710,14 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   }
 
   runSync() {
-    if (this.offlineQueue.pendingCount() === 0) return;
+    if (this.offlineQueue.pendingCount() === 0 || this.syncing()) return;
     this.syncing.set(true);
     this.syncMessage = undefined;
     this.error = undefined;
     this.offlineQueue.sync(this.workOrders).subscribe({
       next: async (res) => {
-        this.syncing.set(false);
+        // Keep syncing=true until AFTER loadFirstPage completes — this prevents
+        // Angular re-render from triggering changeStatus/uploadImage cascades
         if (res.failed > 0) {
           this.syncMessage = `Synced ${res.synced}; ${res.failed} failed.`;
           this.error = res.errors.slice(0, 3).join(' ');
@@ -714,6 +728,8 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
         if (res.synced > 0) {
           await this.loadFirstPage();
         }
+        // NOW safe to allow user interactions again
+        this.syncing.set(false);
       },
       error: (err) => {
         this.syncing.set(false);
