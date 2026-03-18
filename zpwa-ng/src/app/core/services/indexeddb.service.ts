@@ -221,9 +221,8 @@ export async function saveAllWorkOrderRows(branch: string, records: any[]): Prom
   }
 }
 
-// Check if a work order exists in the local IndexedDB row-wise store.
-// - If branch is provided, checks that exact (branch, orderNumber) composite key.
-// - If branch is omitted, checks by orderNumber across all branches (via index when available).
+// Check if a work order exists in the local IndexedDB stores.
+// Checks page-cache first (fast, never locked), then row-wise store.
 export async function workOrderExists(
   orderNumber: number,
   branch?: string,
@@ -231,30 +230,48 @@ export async function workOrderExists(
   try {
     if (orderNumber == null) return false;
     const db = await getDB();
-    if (!db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) return false;
-    const tx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readonly');
-    const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
 
-    const keyBranch = normalizeBranch(branch ?? '');
-    if (keyBranch) {
-      const key = [keyBranch, orderNumber] as IDBValidKey;
-      const found = await store.get(key);
-      return !!found;
-    }
-
-    // Cross-branch lookup: prefer index (fast), fall back to scan.
-    try {
-      if (store.indexNames.contains('orderNumber')) {
-        const idx = store.index('orderNumber');
-        const found = await idx.get(orderNumber as unknown as IDBValidKey);
-        return !!found;
+    // 1. Check page-cache store first (workOrdersCache) — fast and never blocked
+    //    by background prefetch writes to the row-wise store.
+    if (db.objectStoreNames.contains(STORE_WORK_ORDERS_CACHE)) {
+      const tx = db.transaction(STORE_WORK_ORDERS_CACHE, 'readonly');
+      const store = tx.objectStore(STORE_WORK_ORDERS_CACHE);
+      const allCaches = (await store.getAll()) ?? [];
+      for (const cache of allCaches) {
+        const records = cache?.data?.records;
+        if (Array.isArray(records)) {
+          if (records.some((r: any) => r && r.orderNumber === orderNumber)) return true;
+        }
       }
-    } catch {
-      // ignore and fall back to scan
     }
 
-    const all = (await store.getAll()) ?? [];
-    return all.some((r: any) => r && r.orderNumber === orderNumber);
+    // 2. Fallback: check row-wise store (workOrderRecords)
+    if (db.objectStoreNames.contains(STORE_WORK_ORDER_RECORDS)) {
+      const tx = db.transaction(STORE_WORK_ORDER_RECORDS, 'readonly');
+      const store = tx.objectStore(STORE_WORK_ORDER_RECORDS);
+
+      const keyBranch = normalizeBranch(branch ?? '');
+      if (keyBranch) {
+        const key = [keyBranch, orderNumber] as IDBValidKey;
+        const found = await store.get(key);
+        if (found) return true;
+      } else {
+        try {
+          if (store.indexNames.contains('orderNumber')) {
+            const idx = store.index('orderNumber');
+            const found = await idx.get(orderNumber as unknown as IDBValidKey);
+            if (found) return true;
+          }
+        } catch {
+          // ignore and fall back to scan
+        }
+
+        const all = (await store.getAll()) ?? [];
+        if (all.some((r: any) => r && r.orderNumber === orderNumber)) return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }

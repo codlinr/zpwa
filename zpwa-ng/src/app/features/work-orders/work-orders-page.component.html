@@ -8,12 +8,19 @@
       <input
         type="checkbox"
         [checked]="networkState.isOffline()"
-        (change)="networkState.setForceOffline($any($event.target).checked)"
+        (change)="onOfflineToggle($any($event.target).checked)"
       />
       Offline mode
     </label>
     <span class="pending" *ngIf="offlineQueue.pendingCount() > 0">
       Pending: {{ offlineQueue.pendingCount() }}
+      <ul class="queue-detail">
+        <li *ngFor="let op of offlineQueue.pendingOps()">
+          <span *ngIf="op.type === 'image'">Photo #{{ op.payload.orderNumber }} ({{ op.payload.fileName }})</span>
+          <span *ngIf="op.type === 'status'">Status #{{ op.payload.orderNumber }} → {{ op.payload.status }}</span>
+          <span *ngIf="op.type === 'create'">Create ({{ op.payload.description }})</span>
+        </li>
+      </ul>
     </span>
     <button
       type="button"
@@ -118,6 +125,9 @@
             }}</span>
           </div>
         </div>
+
+        <span *ngIf="hasQueuedImage(order.orderNumber)" class="queued-badge">Photo queued</span>
+        <span *ngIf="hasQueuedStatus(order.orderNumber)" class="queued-badge">Status queued</span>
 
         <label class="upload" *ngIf="isRegularOrder(order)">
           Attach photo

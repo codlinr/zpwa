@@ -80,6 +80,13 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  onOfflineToggle(checked: boolean) {
+    this.networkState.setForceOffline(checked);
+    if (!checked && this.offlineQueue.pendingCount() > 0) {
+      this.runSync();
+    }
+  }
+
   ngOnDestroy() {
     // Persist current page to IndexedDB when navigating away so it's available when returning offline
     const p = this.page();
@@ -149,6 +156,18 @@ export class WorkOrdersPageComponent implements OnInit, OnDestroy {
   isPendingOrder(order: WorkOrder): boolean {
     // Pending orders are marked with _pending flag (created offline, not yet synced)
     return order._pending === true;
+  }
+
+  hasQueuedImage(orderNumber: number): boolean {
+    return this.offlineQueue.pendingOps().some(
+      (op) => op.type === 'image' && op.payload.orderNumber === orderNumber,
+    );
+  }
+
+  hasQueuedStatus(orderNumber: number): boolean {
+    return this.offlineQueue.pendingOps().some(
+      (op) => op.type === 'status' && op.payload.orderNumber === orderNumber,
+    );
   }
 
   isRegularOrder(order: WorkOrder): boolean {
